@@ -1,0 +1,55 @@
+{
+  "role": "unknown",
+  "name": "",
+  "description": "",
+  "window_layout": {
+    "surfaces": [
+      {
+        "Main": {
+          "nodes": [
+            {
+              "Leaf": {
+                "rect": {
+                  "min": {
+                    "x": 8.0,
+                    "y": 30.0
+                  },
+                  "max": {
+                    "x": 1016.0,
+                    "y": 738.0
+                  }
+                },
+                "viewport": {
+                  "min": {
+                    "x": 8.0,
+                    "y": 54.0
+                  },
+                  "max": {
+                    "x": 1016.0,
+                    "y": 738.0
+                  }
+                },
+                "tabs": [
+                  "Terminal"
+                ],
+                "active": 0,
+                "scroll": 0.0
+              }
+            }
+          ],
+          "focused_node": null
+        }
+      }
+    ],
+    "focused_surface": null,
+    "translations": {
+      "tab_context_menu": {
+        "close_button": "Close",
+        "eject_button": "Eject"
+      },
+      "window": {
+        "close_button_tooltip": "This window contains non-closable tabs."
+      }
+    }
+  }
+}

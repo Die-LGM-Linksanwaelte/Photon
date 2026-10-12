@@ -1,9 +1,9 @@
 use crate::panels::TabSaveData;
 use common::networking::messages::UserRole;
 use eframe::Theme;
-use egui::accesskit::Role;
 use egui_dock::DockState;
 use serde::{Deserialize, Serialize};
+use common::networking::messages::UserRole::Programmer;
 
 #[derive(Serialize, Deserialize)]
 pub struct GuiConfig {
@@ -16,9 +16,19 @@ pub struct GuiConfig {
 
 #[derive(Serialize, Deserialize)]
 pub struct GuiLayout {
-    pub role: Role,
+    pub role: UserRole,
     pub name: String,
     pub description: String,
     pub window_layout: DockState<TabSaveData>,
 }
 
+impl Default for GuiLayout {
+    fn default() -> Self {
+        Self {
+            role: Programmer,
+            name: "default user name".to_string(),
+            description: "".to_string(),
+            window_layout: DockState::new(vec![TabSaveData::Terminal]),
+        }
+    }
+}

@@ -28,8 +28,7 @@ pub struct LayoutManagerWindow {
 
 impl LayoutManagerWindow {
     pub fn new() -> Self {
-        let base_dir = std::fs::canonicalize("config/window_layouts")
-            .unwrap_or_else(|_| PathBuf::from("config/window_layouts"));
+        let base_dir = crate::APP_CONFIG_DIR.join("window_layouts");
 
         Self {
             is_open: false,

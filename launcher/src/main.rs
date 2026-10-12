@@ -90,10 +90,10 @@ impl LauncherApp {
                 workspace_dir = search_dir.join("gui");
                 break;
             }
-            if search_dir.join("rektal_gui").join("Cargo.toml").exists()
-                || search_dir.join("rektal_kernel").join("Cargo.toml").exists()
+            if search_dir.join("photon_gui").join("Cargo.toml").exists()
+                || search_dir.join("photon_kernel").join("Cargo.toml").exists()
             {
-                workspace_dir = search_dir.join("rektal_gui");
+                workspace_dir = search_dir.join("photon_gui");
                 break;
             }
             if search_dir.join("Cargo.toml").exists() {
@@ -103,8 +103,8 @@ impl LauncherApp {
                 } else if search_dir.join("gui").exists() {
                     workspace_dir = search_dir.join("gui");
                     break;
-                } else if search_dir.join("rektal_gui").exists() {
-                    workspace_dir = search_dir.join("rektal_gui");
+                } else if search_dir.join("photon_gui").exists() {
+                    workspace_dir = search_dir.join("photon_gui");
                     break;
                 }
             }
@@ -239,7 +239,7 @@ impl LauncherApp {
                 let name = p.name().to_string_lossy();
                 name.starts_with("photon_kernel")
                     || name.starts_with("kernel")
-                    || name.starts_with("rektal_kernel")
+                    || name.starts_with("photon_kernel")
             })
     }
 
@@ -259,7 +259,7 @@ impl LauncherApp {
                 let name = p.name().to_string_lossy();
                 name.starts_with("photon_gui")
                     || name.starts_with("gui")
-                    || name.starts_with("rektal_gui")
+                    || name.starts_with("photon_gui")
             })
     }
 }

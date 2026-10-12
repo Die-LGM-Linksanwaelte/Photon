@@ -18,7 +18,7 @@ use crate::panels::terminal::TextFragment;
 use crate::panels::{Tab, TabSaveData};
 use common::logging::LogLevel;
 use common::logging::LogLevel::*;
-use common::networking::messages::{TcpClientMessage, TcpServerMessage};
+use common::networking::messages::{TcpClientMessage, TcpServerMessage, UserRole};
 use common::networking::subscription_objects::{SubscribeTopic, TopicPayload};
 use common::{r_debug_log, r_log};
 use eframe::egui::Color32;
@@ -61,7 +61,7 @@ pub enum UiEvent {
         /// The username for authentication.
         user_name: String,
         /// The requested user role (e.g., Programmer, Showrunner).
-        user_role: common::networking::messages::UserRole,
+        user_role: UserRole,
     },
     /// Requests a user session logout from the kernel server.
     LogoutRequest,
@@ -169,7 +169,7 @@ pub fn log_level_to_color32(level: LogLevel) -> Color32 {
     }
 }
 
-pub fn save_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
+fn save_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
     if let Some(parent) = path_buf.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -199,20 +199,18 @@ pub fn save_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
 
     let gui_config = GuiLayout {
         //TODO richtige werte anpassen!!!!
-        role: Default::default(),
+        role: UserRole::Programmer,
         name: "".to_string(),
         description: "".to_string(),
         window_layout: saved_layout,
     };
 
     if let Err(e) = serde_json::to_writer_pretty(file, &gui_config) {
-        //TODO ordner erstellen falls er nicht existiert
         r_log!(Error, "Failed to serialize GUI config: {}", e);
     }
 }
 
 fn load_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
-    // 1. Datei NUR zum Lesen öffnen (ohne truncate!):
     let file = match std::fs::File::open(&path_buf) {
         Ok(f) => f,
         Err(e) => {
@@ -221,7 +219,6 @@ fn load_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
         }
     };
 
-    // 2. Deserialisieren:
     let gui_config: GuiLayout = match serde_json::from_reader(file) {
         Ok(cfg) => cfg,
         Err(e) => {
@@ -229,7 +226,7 @@ fn load_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
             return;
         }
     };
-    // 1. Erstmal mappen (die Closure ist zustandslos und damit automatisch Clone):
+
     *tree = gui_config
         .window_layout
         .map_tabs(|save_data| match save_data {
@@ -242,7 +239,7 @@ fn load_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
             }
         });
 
-    // 2. Jetzt in einer normalen for-Schleife die IDs durchnummerieren:
+
     let mut id = 1;
     for (_, tab) in tree.iter_all_tabs_mut() {
         match tab {
@@ -527,7 +524,7 @@ pub(crate) fn handle_events(
             }
             UiEvent::ResetGuiLayout => {
                 load_gui_layout(
-                    PathBuf::new().join("config/window_layouts/default.json"),
+                    crate::APP_CONFIG_DIR.join("window_layouts/default.json"),
                     tree,
                 );
             }

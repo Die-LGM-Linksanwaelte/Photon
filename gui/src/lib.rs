@@ -34,7 +34,25 @@ pub mod windows;
 /// Global thread-safe channel sender for dispatching [`UiEvent`]s across the application.
 pub static UI_EVENT_SENDER: LazyLock<RwLock<Option<Sender<UiEvent>>>> =
     LazyLock::new(|| RwLock::new(None));
+pub static APP_CONFIG_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("config"));
+    path.push("photon");
 
+    let _ = std::fs::create_dir_all(&path);
+
+    let layouts_dir = path.join("window_layouts");
+    let _ = std::fs::create_dir_all(&layouts_dir);
+
+    let default_layout = layouts_dir.join("default.json");
+    if !default_layout.exists() {
+        if let Ok(file) = std::fs::File::create(&default_layout) {
+            let default_config = configuration::GuiLayout::default();
+            let _ = serde_json::to_writer_pretty(file, &default_config);
+        }
+    }
+
+    path
+});
 /// The main GUI application state structure.
 ///
 /// Holds the docking state tree, user session parameters, network connection states,
@@ -117,7 +135,7 @@ impl Gui {
             password: String::new(),
             draft_username: String::new(),
             draft_role: UserRole::Programmer,
-            window_layout: PathBuf::new().join("config/window_layouts/default.json"),
+            window_layout: APP_CONFIG_DIR.join("window_layouts/default.json"),
             device_configuration: None,
         };
 

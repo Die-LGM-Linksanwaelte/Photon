@@ -53,13 +53,13 @@ pub fn spawn_process(bin_name: &str, args: &[&str], show_console: bool) -> std::
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    let candidate_names: Vec<String> = if bin_name.starts_with("photon_") || bin_name.starts_with("rektal_") {
+    let candidate_names: Vec<String> = if bin_name.starts_with("photon_"){
         vec![bin_name.to_string()]
     } else {
         vec![
             format!("photon_{}", bin_name),
             bin_name.to_string(),
-            format!("rektal_{}", bin_name),
+            format!("photon_{}", bin_name),
         ]
     };
 

@@ -1,28 +1,32 @@
 //! # Controller Module
 //!
 //! The `controller` module acts as the central event handler and coordinator
-//! for the R.E.K.T.A.L. GUI application.
+//! for the Photon GUI application.
 //!
 //! It is responsible for:
 //! - Draining incoming DMX universe stream data and updating universe UI panels.
 //! - Dispatching global UI events ([`UiEvent`]) via channels.
 //! - Processing network messages ([`TcpServerMessage`]) received from the kernel server.
-//! - Handling UI action events and updating central application states ([`ConnectionState`], [`SessionState`]).
+//! - Handling UI action events and updating central application states (`ConnectionState`, `SessionState`).
 
+use crate::configuration::GuiLayout;
 use crate::network::connection_state::SessionState::{LoggedIn, LoggedOut, LoginFailed};
 use crate::network::connection_state::{ConnectionState, SessionState};
 use crate::network::udp_client::MAX_CHANNEL;
+use crate::panels;
 use crate::panels::terminal::TextFragment;
-use crate::panels::Tab;
+use crate::panels::{Tab, TabSaveData};
 use common::logging::LogLevel;
 use common::logging::LogLevel::*;
-use common::networking::messages::{TcpClientMessage, TcpServerMessage};
+use common::networking::messages::{TcpClientMessage, TcpServerMessage, UserRole};
 use common::networking::subscription_objects::{SubscribeTopic, TopicPayload};
-use common::r_log;
+use common::{r_debug_log, r_log};
 use eframe::egui::Color32;
 use egui_dock::DockState;
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use std::fs::OpenOptions;
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 
 /// Enum describing global GUI events dispatched across the application.
@@ -30,6 +34,19 @@ use std::sync::mpsc::{Receiver, Sender};
 /// These events represent user interactions or system actions that require
 /// coordination between UI panels, the central state, or network threads.
 pub enum UiEvent {
+    /// Updates the central connection and session states of the GUI application.
+    SetConnectionState {
+        /// The target connection state to apply.
+        state: ConnectionState,
+    },
+    ///Saves the Gui layout to a gui_config.json file
+    SaveGuiLayout {
+        path: PathBuf,
+    },
+    LoadGuiLayout {
+        path: PathBuf,
+    },
+    ResetGuiLayout,
     /// Sends a command entered in a terminal panel to the kernel server (or processes built-in commands).
     SendTerminalCommand {
         /// The unique ID of the terminal tab originating the command.
@@ -44,12 +61,7 @@ pub enum UiEvent {
         /// The username for authentication.
         user_name: String,
         /// The requested user role (e.g., Programmer, Showrunner).
-        user_role: common::networking::messages::UserRole,
-    },
-    /// Updates the central connection and session states of the GUI application.
-    SetConnectionState {
-        /// The target connection state to apply.
-        state: ConnectionState,
+        user_role: UserRole,
     },
     /// Requests a user session logout from the kernel server.
     LogoutRequest,
@@ -59,6 +71,12 @@ pub enum UiEvent {
     SubscribeRequest {
         /// The subscription topic requested.
         topic: SubscribeTopic,
+    },
+    UnsubscribeRequest {
+        topic: SubscribeTopic,
+    },
+    CloseTab {
+        tab: Tab,
     },
 }
 
@@ -81,6 +99,11 @@ impl Display for UiEvent {
             UiEvent::LogoutRequest => write!(f, "LogoutRequest"),
             UiEvent::DisconnectRequest => write!(f, "DisconnectRequest"),
             UiEvent::SubscribeRequest { topic } => write!(f, "SubscribeRequest, topic: {}", topic),
+            UiEvent::SaveGuiLayout { path } => write!(f, "SaveGuiLayout: {}", path.display()),
+            UiEvent::LoadGuiLayout { path } => write!(f, "LoadGuiLayout: {}", path.display()),
+            UiEvent::ResetGuiLayout => write!(f, "ResetGuiLayout"),
+            UiEvent::CloseTab { tab } => write!(f, "CloseTab: {}", tab),
+            UiEvent::UnsubscribeRequest { topic } => write!(f, "UnsubscribeRequest: {}", topic),
         }
     }
 }
@@ -106,7 +129,17 @@ pub(crate) fn handle_dmx_data(
     }
 }
 
-/// Thread-safe helper to send a [`UiEvent`] into the global [`UI_EVENT_SENDER`] channel.
+pub fn get_tab_count(tab: &Tab, tree: &mut DockState<Tab>) -> u32 {
+    let mut count = 0;
+    for (_, tab_in_tree) in tree.iter_all_tabs_mut() {
+        if tab.is_same_type(tab_in_tree) {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Thread-safe helper to send a [`UiEvent`] into the global [`crate::UI_EVENT_SENDER`] channel.
 ///
 /// # Arguments
 /// * `event` - The [`UiEvent`] to send.
@@ -116,6 +149,120 @@ pub fn send_ui_event(event: UiEvent) {
             let _ = sender.send(event);
         }
     }
+}
+
+/// Maps a common [`LogLevel`] enum variant to a corresponding `egui` [`Color32`] for UI rendering.
+///
+/// # Arguments
+/// * `level` - The log level to convert.
+///
+/// # Returns
+/// An `egui::Color32` representing the log level.
+pub fn log_level_to_color32(level: LogLevel) -> Color32 {
+    match level {
+        SuccessEvent => Color32::GREEN,
+        Info => Color32::BLUE,
+        Warning => Color32::YELLOW,
+        Error => Color32::RED,
+        UserError => Color32::GOLD,
+        UserSuccess => Color32::LIGHT_GREEN,
+    }
+}
+
+fn save_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
+    if let Some(parent) = path_buf.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let file = match OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path_buf)
+    {
+        Ok(file) => file,
+        Err(e) => {
+            r_log!(Error, "Failed to open config file {:?}: {}", path_buf, e);
+            return;
+        }
+    };
+
+    let saved_layout = tree.map_tabs(|tab| {
+        match tab {
+            Tab::Universe(universe_panel) => TabSaveData::Universe {
+                selected_universe: universe_panel.selected_universe,
+            },
+            Tab::Terminal(_) => TabSaveData::Terminal,
+            Tab::Patch(_) => TabSaveData::Patch,
+        }
+    });
+
+    let gui_config = GuiLayout {
+        //TODO richtige werte anpassen!!!!
+        role: UserRole::Programmer,
+        name: "".to_string(),
+        description: "".to_string(),
+        window_layout: saved_layout,
+    };
+
+    if let Err(e) = serde_json::to_writer_pretty(file, &gui_config) {
+        r_log!(Error, "Failed to serialize GUI config: {}", e);
+    }
+}
+
+fn load_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
+    let file = match std::fs::File::open(&path_buf) {
+        Ok(f) => f,
+        Err(e) => {
+            r_log!(Warning, "Could not open layout file {:?}: {}", path_buf, e);
+            return;
+        }
+    };
+
+    let gui_config: GuiLayout = match serde_json::from_reader(file) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            r_log!(Error, "Failed to parse GUI config: {}", e);
+            return;
+        }
+    };
+
+    *tree = gui_config
+        .window_layout
+        .map_tabs(|save_data| match save_data {
+            TabSaveData::Terminal => Tab::Terminal(panels::terminal::TerminalPanel::new(0, false)),
+            TabSaveData::Patch => Tab::Patch(panels::patch::PatchPanel::new(0)),
+            TabSaveData::Universe { selected_universe } => {
+                let mut panel = panels::universe::UniversePanel::new(0);
+                panel.selected_universe = *selected_universe;
+                Tab::Universe(panel)
+            }
+        });
+
+
+    let mut id = 1;
+    for (_, tab) in tree.iter_all_tabs_mut() {
+        match tab {
+            Tab::Terminal(p) => {
+                p.tab_id = id;
+                id += 1;
+            }
+            Tab::Patch(p) => {
+                p.tab_id = id;
+                id += 1;
+            }
+            Tab::Universe(p) => {
+                p.tab_id = id;
+                id += 1;
+            }
+        }
+    }
+
+    r_log!(
+        UserSuccess,
+        "Successfully loaded GUI layout from {:?}",
+        path_buf
+    );
 }
 
 /// Processes a command entered into a terminal tab.
@@ -164,25 +311,6 @@ fn process_terminal_command(
         }
     }
 }
-
-/// Maps a common [`LogLevel`] enum variant to a corresponding `egui` [`Color32`] for UI rendering.
-///
-/// # Arguments
-/// * `level` - The log level to convert.
-///
-/// # Returns
-/// An `egui::Color32` representing the log level.
-pub fn log_level_to_color32(level: LogLevel) -> Color32 {
-    match level {
-        SuccessEvent => Color32::GREEN,
-        Info => Color32::BLUE,
-        Warning => Color32::YELLOW,
-        Error => Color32::RED,
-        UserError => Color32::GOLD,
-        UserSuccess => Color32::LIGHT_GREEN,
-    }
-}
-
 /// Drains incoming network messages ([`TcpServerMessage`]) from the TCP receiver channel
 /// and updates UI tabs or triggers connection state changes.
 ///
@@ -247,16 +375,28 @@ pub(crate) fn handle_incoming_network_data(
                 },
                 TcpServerMessage::ShutdownAnnouncement => {
                     send_ui_event(UiEvent::SetConnectionState {
-                        state: ConnectionState::Disconnected
+                        state: ConnectionState::Disconnected,
                     });
-                },
-                TcpServerMessage::Unauthenticated => {
-                    r_log!(UserError, "Server couldn't Unauthenticated");
                 }
-                TcpServerMessage::ReloginOk { .. } => {}
-                TcpServerMessage::ReloginFailed { .. } => {}
-                TcpServerMessage::Kicked { .. } => {}
-                TcpServerMessage::ImplicitCommandOutput { .. } => {}
+                TcpServerMessage::Unauthenticated => {
+                    r_log!(
+                        UserError,
+                        "Server couldn't handle request: User Unauthenticated!"
+                    );
+                }
+                TcpServerMessage::ReloginOk { token } => {
+                    r_log!(UserSuccess, "Relogin Successful! Token: {}", token);
+                    //TODO..
+                }
+                TcpServerMessage::ReloginFailed { reason } => {
+                    r_log!(UserError, "Relogin failed: {}", reason);
+                    //TODO..
+                }
+                TcpServerMessage::Kicked { reason } => {
+                    r_log!(UserError, "Client was kicked: {}", reason);
+                    //TODO
+                }
+                TcpServerMessage::ImplicitCommandOutput { .. } => {} //TODO..
                 TcpServerMessage::EditGranted { .. } => {}
                 TcpServerMessage::EditDenied { .. } => {}
                 TcpServerMessage::DropEditAck(_) => {}
@@ -282,7 +422,7 @@ pub(crate) fn handle_events(
     tree: &mut DockState<Tab>,
 ) {
     while let Ok(event) = ui_receiver.try_recv() {
-        r_log!(Info, "UIEvent: {}" ,event);
+        r_debug_log!(Info, "UIEvent: {}", event);
         match event {
             UiEvent::SendTerminalCommand { id, command } => {
                 process_terminal_command(id, command, tcp_sender, tree);
@@ -373,6 +513,38 @@ pub(crate) fn handle_events(
                 if let Some(tcp_sender) = tcp_sender {
                     if let Err(e) = tcp_sender.send(msg) {
                         r_log!(Error, "Failed to send subscribe request: {}", e);
+                    }
+                }
+            }
+            UiEvent::SaveGuiLayout { path } => {
+                save_gui_layout(path, tree);
+            }
+            UiEvent::LoadGuiLayout { path } => {
+                load_gui_layout(PathBuf::new().join(path), tree);
+            }
+            UiEvent::ResetGuiLayout => {
+                load_gui_layout(
+                    crate::APP_CONFIG_DIR.join("window_layouts/default.json"),
+                    tree,
+                );
+            }
+            UiEvent::CloseTab { tab } => {
+                if get_tab_count(&tab, tree) == 0 {
+                    let topic_option: Option<SubscribeTopic> = match tab {
+                        Tab::Terminal { .. } => None,
+                        Tab::Universe { .. } => Some(SubscribeTopic::DMXConfiguration),
+                        Tab::Patch { .. } => None,
+                    };
+                    if let Some(topic) = topic_option {
+                        send_ui_event(UiEvent::UnsubscribeRequest { topic });
+                    }
+                }
+            }
+            UiEvent::UnsubscribeRequest { topic } => {
+                let msg = TcpClientMessage::Unsubscribe { topic };
+                if let Some(tcp_sender) = tcp_sender {
+                    if let Err(e) = tcp_sender.send(msg) {
+                        r_log!(Error, "Failed to send unsubscribe message: {}", e);
                     }
                 }
             }

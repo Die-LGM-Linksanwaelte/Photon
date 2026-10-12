@@ -3,7 +3,10 @@
 //! This module defines the core panel types and docking tab structures used by the GUI interface.
 //! It exposes the [`Tab`] enum encapsulating various panel components like [`UniversePanel`] and [`TerminalPanel`].
 
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use eframe::egui;
+use serde::{Deserialize, Serialize};
 use common::logging::LogLevel::Error;
 use common::networking::subscription_objects::SubscribeTopic::DMXConfiguration;
 use common::r_log;
@@ -12,11 +15,22 @@ use common::r_log;
 pub mod terminal;
 /// Module implementing the visual DMX universe panel tab.
 pub mod universe;
+/// Module implementing the patch panel tab.
+pub mod patch;
 
 use terminal::TerminalPanel;
 use universe::UniversePanel;
-use crate::controller::UiEvent;
+use patch::PatchPanel;
+use crate::controller::{send_ui_event, UiEvent};
 use crate::UI_EVENT_SENDER;
+
+/// Enum
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum TabSaveData {
+    Terminal,
+    Patch,
+    Universe { selected_universe: u8 },
+}
 
 /// Enum representing all dockable tab types supported in the user interface.
 #[derive(Clone)]
@@ -25,6 +39,21 @@ pub enum Tab {
     Universe(UniversePanel),
     /// Tab displaying an interactive terminal command log.
     Terminal(TerminalPanel),
+    /// Tab
+    Patch(PatchPanel),
+}
+
+impl Display for Tab {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Tab::Universe{ .. } => {
+                write!(f, "{}", serde_json::to_string("UniverseTab").unwrap())},
+            Tab::Terminal{ .. } => {
+                write!(f, "{}", serde_json::to_string("TerminalTab").unwrap())},
+            Tab::Patch{ .. } => {
+                write!(f, "{}", serde_json::to_string("PatchTab").unwrap())},
+        }
+    }
 }
 
 impl Tab {
@@ -33,7 +62,12 @@ impl Tab {
         match self {
             Tab::Universe(panel) => format!("Universe {}", panel.selected_universe),
             Tab::Terminal(_) => "Terminal".to_string(),
+            Tab::Patch(_) => "Patch".to_string(),
         }
+    }
+
+    pub fn is_same_type(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
     }
 
     /// Returns a unique string identifier for this tab instance used by the dock state.
@@ -41,6 +75,7 @@ impl Tab {
         match self {
             Tab::Universe(panel) => format!("universe_tab_{}", panel.tab_id),
             Tab::Terminal(panel) => format!("terminal_tab_{}", panel.tab_id),
+            Tab::Patch(panel) => format!("patch_tab_{}", panel.tab_id),
         }
     }
 
@@ -52,6 +87,7 @@ impl Tab {
         match self {
             Tab::Universe(panel) => panel.ui(ui),
             Tab::Terminal(panel) => panel.ui(ui),
+            Tab::Patch(panel) => panel.ui(ui),
         }
     }
 
@@ -68,6 +104,13 @@ impl Tab {
                 }
             }
             Tab::Terminal(_) => {}
+            Tab::Patch(_) => {}
         }
+    }
+
+    pub fn on_close(&mut self) {
+        send_ui_event(UiEvent::CloseTab {
+            tab: self.clone(),
+        });
     }
 }

@@ -76,7 +76,7 @@ impl TcpClient {
         let mut write_stream = match TcpStream::connect(&self.target) {
             Ok(stream) => stream,
             Err(e) => {
-                eprintln!("[System] Unable to connect to {}: {}", self.target, e);
+                r_log!(Error, "Unable to connect to {}: {}", self.target, e);
                 return;
             }
         };
@@ -84,7 +84,7 @@ impl TcpClient {
         let (protocol_hash, client_version) = networking::messages::get_protocol_version();
 
         let req = HandshakeRequest {
-            magic_string: "REKTAL".into(),
+            magic_string: "PHOTON".into(),
             protocol_hash,
             client_version: client_version.clone(),
         };

@@ -1,7 +1,7 @@
 //! # Terminal Panel Module
 //!
-//! This module implements the interactive Terminal UI panel for the R.E.K.T.A.L. GUI application.
-//! It displays a scrollable log history of colored text fragments ([`TextFragment`]), supports command 
+//! This module implements the interactive Terminal UI panel for the Photon GUI application.
+//! It displays a scrollable log history of colored text fragments ([`TextFragment`](crate::panels::terminal::TextFragment)), supports command 
 //! history navigation using the arrow keys, and dispatches user commands to the central controller.
 
 use crate::controller::UiEvent;
@@ -175,7 +175,7 @@ impl TerminalPanel {
                             .interactive(self.is_active),
                     );
 
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if (response.lost_focus() || response.has_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         if !self.input_text.is_empty() {
                             self.add_fragments(vec![
                                 TextFragment {

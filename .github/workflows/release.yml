@@ -1,4 +1,4 @@
-name: Build and Release R.E.K.T.A.L.
+name: Build and Release PHOTON
 
 on:
   push:

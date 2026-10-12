@@ -1,32 +1,60 @@
-//TODO: change the config-path to a os-typical one
-//TODO: press enter zum laden oder speichern in popup
+//! # Layout Manager Window
+//!
+//! Provides a modal window interface for managing, loading, and saving docking layout presets.
+//! Features include directory navigation, creating subfolders, inline renaming, drag-and-drop
+//! reordering of layout presets and directories, and overwrite protection for presets.
 
 use eframe::egui;
 use std::path::{Path, PathBuf};
 use crate::controller::{send_ui_event, UiEvent};
 
+/// Mode indicating the primary purpose of the layout manager modal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutDialogMode {
+    /// Browse and load an existing layout preset.
     Load,
+    /// Save the current layout state under a new or existing name.
     SaveAs,
 }
 
+/// Modal window component for browsing, loading, saving, and managing docking layouts.
+///
+/// Supports nested folder hierarchies, drag-and-drop reorganization,
+/// inline renaming (via F2 or context menu), and overwrite warnings.
 pub struct LayoutManagerWindow {
+    /// Whether the layout manager dialog is currently visible.
     pub is_open: bool,
+    /// Root directory for window layouts (`<config>/photon/window_layouts`).
     pub base_dir: PathBuf,
+    /// Current mode of the dialog (Load or SaveAs).
     pub mode: LayoutDialogMode,
+    /// Currently selected file or folder in the tree view.
     pub selected_item: Option<PathBuf>,
+    /// Buffer for the layout name when saving a layout.
     pub input_name: String,
 
+    /// Target path pending overwrite confirmation modal, if any.
     pub show_overwrite_warning: Option<PathBuf>,
+    /// Path of the item currently undergoing inline renaming, if any.
     pub renaming_path: Option<PathBuf>,
+    /// Input buffer for inline renaming.
     pub rename_buffer: String,
+    /// Indicates whether the "New Folder" input row is currently shown.
     pub creating_folder: bool,
+    /// Input buffer for creating a new folder.
     pub new_folder_name: String,
+    /// Directory path currently hovered as a valid drag-and-drop destination.
     pub hovered_drop_target: Option<PathBuf>,
 }
 
+impl Default for LayoutManagerWindow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LayoutManagerWindow {
+    /// Creates a new [`LayoutManagerWindow`] rooted at the application layout configuration directory.
     pub fn new() -> Self {
         let base_dir = crate::APP_CONFIG_DIR.join("window_layouts");
 
@@ -67,6 +95,7 @@ impl LayoutManagerWindow {
         self.open_load();
     }
 
+    /// Resets transient dialog state including warnings, active rename operations, and folder creation flags.
     fn reset_dialog_state(&mut self) {
         self.show_overwrite_warning = None;
         self.renaming_path = None;
@@ -260,6 +289,7 @@ impl LayoutManagerWindow {
         self.draw_dnd_preview(ctx);
     }
 
+    /// Renders the top toolbar containing folder creation controls and current target directory indicator.
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui.button("📁+ New Folder").clicked() {
@@ -540,6 +570,7 @@ impl LayoutManagerWindow {
         }
     }
 
+    /// Renders the bottom action bar with layout name input, Load/Save actions, and selected item actions (Delete/Rename).
     fn render_bottom_actions(&mut self, ui: &mut egui::Ui) {
         if self.mode == LayoutDialogMode::SaveAs {
             ui.horizontal(|ui| {

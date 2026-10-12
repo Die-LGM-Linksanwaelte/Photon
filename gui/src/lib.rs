@@ -12,7 +12,7 @@ use common::logging::LogLevel::*;
 use common::networking::messages::UserRole;
 use common::networking::messages::{TcpClientMessage, TcpServerMessage};
 use common::networking::subscription_objects::SubscribeTopic::DMXConfiguration;
-use common::r_log;
+use common::{networking, r_log};
 use eframe::egui;
 use eframe::emath::Align;
 use egui::{vec2, Align2, Id, Layout, Order};
@@ -29,11 +29,17 @@ pub mod configuration;
 pub mod controller;
 pub mod network;
 pub mod panels;
+/// Submodule containing modal and standalone GUI windows (e.g. Layout Manager).
 pub mod windows;
 
 /// Global thread-safe channel sender for dispatching [`UiEvent`]s across the application.
 pub static UI_EVENT_SENDER: LazyLock<RwLock<Option<Sender<UiEvent>>>> =
     LazyLock::new(|| RwLock::new(None));
+
+/// Global thread-safe path pointing to the OS-specific application configuration directory
+/// (e.g., `~/.config/photon` on Linux, `%APPDATA%\photon` on Windows).
+///
+/// Automatically creates the directory tree and writes the initial `default.json` layout preset on first access.
 pub static APP_CONFIG_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
     let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("config"));
     path.push("photon");
@@ -259,7 +265,6 @@ impl Gui {
     /// * `ctx` - The `egui::Context` reference.
     pub fn draw_central_panel(&mut self, ctx: &egui::Context, is_active: bool) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            // 1. Schicker, moderner Scope für aktiviert / deaktiviert:
             ui.add_enabled_ui(is_active, |ui| {
                 let mut tab_viewer = MyTabViewer {};
                 DockArea::new(&mut self.tree)
@@ -267,10 +272,8 @@ impl Gui {
                     .show_inside(ui, &mut tab_viewer);
             });
 
-            // 2. Optischer Grauschleier, wenn inaktiv:
             if !is_active {
                 let mut backdrop_rect = ctx.screen_rect();
-                // Variante A (Empfohlen): Hört exakt da auf, wo deine Bottom Bar anfängt:
                 backdrop_rect.max.y = ui.max_rect().max.y;
 
                 egui::Area::new(Id::new("modal_backdrop"))
@@ -286,7 +289,6 @@ impl Gui {
                         );
                     });
 
-                // B) Das eigentliche Fenster im Vordergrund
                 egui::Window::new("Connect your Session!")
                     .collapsible(false)
                     .resizable(false)
@@ -572,11 +574,9 @@ impl Gui {
                         );
                     }
 
-                    // Echter geometrischer Kreis mit Painter:
                     let circle_center = egui::pos2(rect.min.x + circle_radius, rect.center().y);
                     ui.painter().circle_filled(circle_center, circle_radius, status_color);
 
-                    // Text:
                     let text_pos = egui::pos2(
                         rect.min.x + (circle_radius * 2.0) + spacing,
                         rect.center().y - galley.size().y / 2.0,
@@ -591,12 +591,10 @@ impl Gui {
 
                 let status_response = status_response.on_hover_cursor(egui::CursorIcon::PointingHand);
 
-                // Klick toggelt das Menü
                 if status_response.clicked() {
                     ui.memory_mut(|mem| mem.toggle_popup(popup_id));
                 }
 
-                // Menü NACH OBEN hin öffnen (wichtig für die Bottom-Bar):
                 egui::popup::popup_above_or_below_widget(
                     ui,
                     popup_id,
@@ -660,12 +658,11 @@ impl Gui {
                     },
                 );
 
-                // Rechte Seite der Bottom-Bar
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(format!(
                         "Photon Version: {}",
-                        env!("CARGO_PKG_VERSION")
-                    ));
+                        networking::messages::get_protocol_version())
+                    );
                 });
             });
         });
@@ -697,7 +694,6 @@ impl eframe::App for Gui {
         self.draw_central_panel(ctx, is_active);
         self.draw_connection_settings(ctx);
         self.draw_session_settings(ctx);
-        //self.draw_layout_browser(ctx);
 
         self.layout_manager.show(ctx);
     }

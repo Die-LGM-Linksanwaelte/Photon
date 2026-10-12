@@ -7,7 +7,7 @@
 //! - Draining incoming DMX universe stream data and updating universe UI panels.
 //! - Dispatching global UI events ([`UiEvent`]) via channels.
 //! - Processing network messages ([`TcpServerMessage`]) received from the kernel server.
-//! - Handling UI action events and updating central application states ([`ConnectionState`], [`SessionState`]).
+//! - Handling UI action events and updating central application states (`ConnectionState`, `SessionState`).
 
 use crate::configuration::GuiLayout;
 use crate::network::connection_state::SessionState::{LoggedIn, LoggedOut, LoginFailed};
@@ -139,7 +139,7 @@ pub fn get_tab_count(tab: &Tab, tree: &mut DockState<Tab>) -> u32 {
     count
 }
 
-/// Thread-safe helper to send a [`UiEvent`] into the global [`UI_EVENT_SENDER`] channel.
+/// Thread-safe helper to send a [`UiEvent`] into the global [`crate::UI_EVENT_SENDER`] channel.
 ///
 /// # Arguments
 /// * `event` - The [`UiEvent`] to send.

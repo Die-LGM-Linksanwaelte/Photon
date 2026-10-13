@@ -12,31 +12,140 @@ permissions:
   contents: write
 
 jobs:
-  bump-and-tag:
+  prepare:
+    name: Prepare release
     runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      tag_exists: ${{ steps.check.outputs.tag_exists }}
+      changes: ${{ steps.check.outputs.changes }}
+
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ssh-key: ${{ secrets.DEPLOY_KEY }}
 
-      - name: Set version in common/Cargo.toml
+      - name: Check version and tag
+        id: check
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${{ inputs.version }}"
-          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" common/Cargo.toml
-          grep -m1 '^version' common/Cargo.toml
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
 
-      - name: Commit version bump
+          TAG="v$VERSION"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # Update the first version field in common/Cargo.toml
+          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" common/Cargo.toml
+
+          if git diff --quiet -- common/Cargo.toml; then
+            echo "changes=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::common/Cargo.toml already contains version $VERSION. No commit will be necessary."
+          else
+            echo "changes=true" >> "$GITHUB_OUTPUT"
+            echo "Version change detected."
+          fi
+
+          git fetch origin --tags --force
+
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Tag $TAG already exists! The old tag must be deleted before this version can be tagged again."
+            echo "::warning::Existing tag commit: $(git rev-list -n 1 "$TAG")"
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG does not exist yet."
+          fi
+
+          echo ""
+          echo "========== RELEASE SUMMARY =========="
+          echo "Version:       $VERSION"
+          echo "Tag:           $TAG"
+          echo "File changed:  $(git diff --quiet -- common/Cargo.toml && echo no || echo yes)"
+          echo "Tag exists:    $(git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && echo yes || echo no)"
+          echo "====================================="
+
+  approve:
+    name: Approve release
+    runs-on: ubuntu-latest
+    needs: prepare
+    environment: release-approval
+
+    steps:
+      - name: Display release warnings
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANGES: ${{ needs.prepare.outputs.changes }}
+          TAG_EXISTS: ${{ needs.prepare.outputs.tag_exists }}
+        run: |
+          echo "Preparing release $VERSION"
+
+          if [[ "$CHANGES" == "false" ]]; then
+            echo "::warning::The version is already set. No version commit will be created."
+          fi
+
+          if [[ "$TAG_EXISTS" == "true" ]]; then
+            echo "::warning::Tag v$VERSION already exists. Delete the old tag locally and remotely before rerunning this workflow."
+            echo "::warning::No existing tag will be overwritten."
+          fi
+
+          echo "Review the warnings above before approving this release."
+
+  release:
+    name: Commit and tag release
+    runs-on: ubuntu-latest
+    needs: [prepare, approve]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add common/Cargo.toml
-          git commit -m "chore: bump version to ${{ inputs.version }}"
-          git push
+
+      - name: Update version and commit if needed
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANGES: ${{ needs.prepare.outputs.changes }}
+        run: |
+          git fetch origin
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+
+          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" common/Cargo.toml
+
+          if git diff --quiet -- common/Cargo.toml; then
+            echo "Version already set to $VERSION. Skipping commit."
+          else
+            git add common/Cargo.toml
+            git commit -m "chore: bump version to $VERSION"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
 
       - name: Create and push tag
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          VERSION="v${{ inputs.version }}"
-          git tag "$VERSION"
-          git push origin "$VERSION"
+          TAG="v$VERSION"
+
+          git fetch origin --tags
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists on origin. Delete the old tag before rerunning this workflow."
+            exit 1
+          fi
+
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Successfully created and pushed $TAG."

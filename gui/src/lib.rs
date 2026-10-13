@@ -661,7 +661,7 @@ impl Gui {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(format!(
                         "Photon Version: {}",
-                        networking::messages::get_protocol_version())
+                        networking::messages::get_protocol_version().1)
                     );
                 });
             });

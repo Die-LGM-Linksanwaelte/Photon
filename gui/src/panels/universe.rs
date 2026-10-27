@@ -404,7 +404,7 @@ impl UniversePanel {
         };
 
         let stroke = if is_hovered_device {
-            egui::Stroke::new(1.5, ui.visuals().widgets.hovered.bg_stroke.color)
+            egui::Stroke::new(1.5f32, ui.visuals().widgets.hovered.bg_stroke.color)
         } else {
             ui.visuals().widgets.noninteractive.bg_stroke
         };
@@ -438,7 +438,11 @@ impl UniversePanel {
                         ui.add_space(4.0);
                         if self.show_device_properties {
                             match &dmx_config {
-                                DMXConfigurationForClient::Reserved { property_type, fine_degree, .. } => {
+                                DMXConfigurationForClient::Reserved {
+                                    property_type,
+                                    fine_degree,
+                                    ..
+                                } => {
                                     let mut prop_str = match property_type {
                                         PropertyType::Simple(simple) => format!("{}", simple),
                                         PropertyType::Color(color) => format!("{}", color),

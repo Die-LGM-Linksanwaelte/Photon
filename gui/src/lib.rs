@@ -197,8 +197,8 @@ impl Gui {
                             new_tab_id,
                             self.connection_state
                                 == Connected {
-                                session_state: SessionState::LoggedIn,
-                            },
+                                    session_state: SessionState::LoggedIn,
+                                },
                         );
 
                         self.tree
@@ -239,7 +239,10 @@ impl Gui {
                     ui.separator();
 
                     if ui.button("Save window layout").clicked() {
-                        send_ui_event(UiEvent::SaveGuiLayout { path: self.window_layout.clone() });
+                        send_ui_event(UiEvent::SaveGuiLayout {
+                            path: self.window_layout.clone(),
+                            user_role: self.role.clone(),
+                        });
                         ui.close_menu();
                     }
                     if ui.button("Save window layout as...").clicked() {
@@ -319,9 +322,9 @@ impl Gui {
                                     ui.label("Role");
                                     egui::ComboBox::from_id_source("role_combo")
                                         .selected_text(match self.draft_role {
-                                             UserRole::Programmer => "Programmer",
-                                             UserRole::BlindProgrammer => "Programmer Blind",
-                                             UserRole::Showrunner => "Showrunner",
+                                            UserRole::Programmer => "Programmer",
+                                            UserRole::BlindProgrammer => "Programmer Blind",
+                                            UserRole::Showrunner => "Showrunner",
                                         })
                                         .show_ui(ui, |ui| {
                                             ui.selectable_value(
@@ -426,7 +429,7 @@ impl Gui {
         if request_conn_close {
             is_connection_open = false;
         }
-        
+
         self.show_connection_settings = is_connection_open;
     }
 
@@ -533,7 +536,9 @@ impl Gui {
         egui::TopBottomPanel::bottom("bottom_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let status_color = match &self.connection_state {
-                    ConnectionState::Disconnected | ConnectionState::Error => egui::Color32::RED,
+                    ConnectionState::Disconnected
+                    | ConnectionState::Error
+                    | ConnectionState::Kicked => egui::Color32::RED,
                     ConnectionState::ConnectionPending => egui::Color32::YELLOW,
                     Connected { session_state } => match session_state {
                         SessionState::LoginFailed(_) => egui::Color32::YELLOW,
@@ -556,14 +561,19 @@ impl Gui {
                 };
 
                 let font_id = egui::TextStyle::Body.resolve(ui.style());
-                let galley = ui.painter().layout_no_wrap(label_text, font_id, ui.visuals().text_color());
+                let galley =
+                    ui.painter()
+                        .layout_no_wrap(label_text, font_id, ui.visuals().text_color());
 
                 let circle_radius = 4.0;
                 let spacing = 6.0;
                 let total_width = (circle_radius * 2.0) + spacing + galley.size().x;
-                let total_height = (circle_radius * 2.0).max(galley.size().y).max(ui.spacing().interact_size.y);
+                let total_height = (circle_radius * 2.0)
+                    .max(galley.size().y)
+                    .max(ui.spacing().interact_size.y);
 
-                let (rect, status_response) = ui.allocate_exact_size(vec2(total_width, total_height), egui::Sense::click());
+                let (rect, status_response) =
+                    ui.allocate_exact_size(vec2(total_width, total_height), egui::Sense::click());
 
                 if ui.is_rect_visible(rect) {
                     if status_response.hovered() {
@@ -575,7 +585,8 @@ impl Gui {
                     }
 
                     let circle_center = egui::pos2(rect.min.x + circle_radius, rect.center().y);
-                    ui.painter().circle_filled(circle_center, circle_radius, status_color);
+                    ui.painter()
+                        .circle_filled(circle_center, circle_radius, status_color);
 
                     let text_pos = egui::pos2(
                         rect.min.x + (circle_radius * 2.0) + spacing,
@@ -589,7 +600,8 @@ impl Gui {
                     ui.painter().galley(text_pos, galley, text_color);
                 }
 
-                let status_response = status_response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                let status_response =
+                    status_response.on_hover_cursor(egui::CursorIcon::PointingHand);
 
                 if status_response.clicked() {
                     ui.memory_mut(|mem| mem.toggle_popup(popup_id));
@@ -626,11 +638,11 @@ impl Gui {
                         if ui
                             .add_enabled(
                                 matches!(
-                                self.connection_state,
-                                Connected {
-                                    session_state: SessionState::LoggedIn
-                                }
-                            ),
+                                    self.connection_state,
+                                    Connected {
+                                        session_state: SessionState::LoggedIn
+                                    }
+                                ),
                                 egui::Button::new("Logout"),
                             )
                             .clicked()
@@ -661,8 +673,8 @@ impl Gui {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(format!(
                         "Photon Version: {}",
-                        networking::messages::get_protocol_version().1)
-                    );
+                        networking::messages::get_protocol_version().1
+                    ));
                 });
             });
         });

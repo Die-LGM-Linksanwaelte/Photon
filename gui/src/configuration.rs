@@ -5,10 +5,10 @@
 
 use crate::panels::TabSaveData;
 use common::networking::messages::UserRole;
+use common::networking::messages::UserRole::Programmer;
 use eframe::Theme;
 use egui_dock::DockState;
 use serde::{Deserialize, Serialize};
-use common::networking::messages::UserRole::Programmer;
 
 /// Represents persistent application-wide preferences and session settings.
 #[derive(Serialize, Deserialize)]
@@ -30,8 +30,6 @@ pub struct GuiConfig {
 pub struct GuiLayout {
     /// The target user role this layout is associated with.
     pub role: UserRole,
-    /// Human-readable preset name.
-    pub name: String,
     /// Detailed description of the layout preset.
     pub description: String,
     /// Serialized docking tree state containing all open panels and tabs.
@@ -43,7 +41,6 @@ impl Default for GuiLayout {
     fn default() -> Self {
         Self {
             role: Programmer,
-            name: "default user name".to_string(),
             description: "".to_string(),
             window_layout: DockState::new(vec![TabSaveData::Terminal]),
         }

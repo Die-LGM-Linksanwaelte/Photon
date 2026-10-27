@@ -16,6 +16,8 @@ pub enum ConnectionState {
     },
     /// No network connection is active.
     Disconnected,
+    /// Client was kicked
+    Kicked,
     /// Connection attempt failed or an error occurred on the TCP socket.
     Error,
     /// Connection attempt is currently in progress (e.g. TCP handshake ongoing).
@@ -38,6 +40,7 @@ impl Display for ConnectionState {
         match self {
             ConnectionState::Connected { session_state } => write!(f, "Connected and {}", session_state),
             ConnectionState::Disconnected => write!(f, "Disconnected"),
+            ConnectionState::Kicked => write!(f, "Kicked"),
             ConnectionState::Error => write!(f, "Error"),
             ConnectionState::ConnectionPending => write!(f, "Connection Pending")
         }

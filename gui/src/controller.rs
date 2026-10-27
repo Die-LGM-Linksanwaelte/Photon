@@ -10,6 +10,7 @@
 //! - Handling UI action events and updating central application states (`ConnectionState`, `SessionState`).
 
 use crate::configuration::GuiLayout;
+use crate::controller::UiEvent::SetConnectionState;
 use crate::network::connection_state::SessionState::{LoggedIn, LoggedOut, LoginFailed};
 use crate::network::connection_state::{ConnectionState, SessionState};
 use crate::network::udp_client::MAX_CHANNEL;
@@ -42,6 +43,7 @@ pub enum UiEvent {
     ///Saves the Gui layout to a gui_config.json file
     SaveGuiLayout {
         path: PathBuf,
+        user_role: UserRole,
     },
     LoadGuiLayout {
         path: PathBuf,
@@ -99,7 +101,12 @@ impl Display for UiEvent {
             UiEvent::LogoutRequest => write!(f, "LogoutRequest"),
             UiEvent::DisconnectRequest => write!(f, "DisconnectRequest"),
             UiEvent::SubscribeRequest { topic } => write!(f, "SubscribeRequest, topic: {}", topic),
-            UiEvent::SaveGuiLayout { path } => write!(f, "SaveGuiLayout: {}", path.display()),
+            UiEvent::SaveGuiLayout { path, user_role } => write!(
+                f,
+                "SaveGuiLayout, path: {}, UserRole: {}",
+                path.display(),
+                user_role
+            ),
             UiEvent::LoadGuiLayout { path } => write!(f, "LoadGuiLayout: {}", path.display()),
             UiEvent::ResetGuiLayout => write!(f, "ResetGuiLayout"),
             UiEvent::CloseTab { tab } => write!(f, "CloseTab: {}", tab),
@@ -169,7 +176,7 @@ pub fn log_level_to_color32(level: LogLevel) -> Color32 {
     }
 }
 
-fn save_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
+fn save_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>, user_role: UserRole) {
     if let Some(parent) = path_buf.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -187,25 +194,21 @@ fn save_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
         }
     };
 
-    let saved_layout = tree.map_tabs(|tab| {
-        match tab {
-            Tab::Universe(universe_panel) => TabSaveData::Universe {
-                selected_universe: universe_panel.selected_universe,
-            },
-            Tab::Terminal(_) => TabSaveData::Terminal,
-            Tab::Patch(_) => TabSaveData::Patch,
-        }
+    let saved_layout = tree.map_tabs(|tab| match tab {
+        Tab::Universe(universe_panel) => TabSaveData::Universe {
+            selected_universe: universe_panel.selected_universe,
+        },
+        Tab::Terminal(_) => TabSaveData::Terminal,
+        Tab::Patch(_) => TabSaveData::Patch,
     });
 
-    let gui_config = GuiLayout {
-        //TODO richtige werte anpassen!!!!
-        role: UserRole::Programmer,
-        name: "".to_string(),
+    let gui_layout = GuiLayout {
+        role: user_role,
         description: "".to_string(),
         window_layout: saved_layout,
     };
 
-    if let Err(e) = serde_json::to_writer_pretty(file, &gui_config) {
+    if let Err(e) = serde_json::to_writer_pretty(file, &gui_layout) {
         r_log!(Error, "Failed to serialize GUI config: {}", e);
     }
 }
@@ -238,7 +241,6 @@ fn load_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
                 Tab::Universe(panel)
             }
         });
-
 
     let mut id = 1;
     for (_, tab) in tree.iter_all_tabs_mut() {
@@ -394,7 +396,9 @@ pub(crate) fn handle_incoming_network_data(
                 }
                 TcpServerMessage::Kicked { reason } => {
                     r_log!(UserError, "Client was kicked: {}", reason);
-                    //TODO
+                    send_ui_event(SetConnectionState {
+                        state: ConnectionState::Kicked,
+                    });
                 }
                 TcpServerMessage::ImplicitCommandOutput { .. } => {} //TODO..
                 TcpServerMessage::EditGranted { .. } => {}
@@ -516,8 +520,8 @@ pub(crate) fn handle_events(
                     }
                 }
             }
-            UiEvent::SaveGuiLayout { path } => {
-                save_gui_layout(path, tree);
+            UiEvent::SaveGuiLayout { path, user_role } => {
+                save_gui_layout(path, tree, user_role);
             }
             UiEvent::LoadGuiLayout { path } => {
                 load_gui_layout(PathBuf::new().join(path), tree);

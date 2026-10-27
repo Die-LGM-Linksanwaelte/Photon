@@ -4,9 +4,10 @@
 //! Features include directory navigation, creating subfolders, inline renaming, drag-and-drop
 //! reordering of layout presets and directories, and overwrite protection for presets.
 
+use crate::controller::{send_ui_event, UiEvent};
+use common::networking::messages::UserRole::Programmer;
 use eframe::egui;
 use std::path::{Path, PathBuf};
-use crate::controller::{send_ui_event, UiEvent};
 
 /// Mode indicating the primary purpose of the layout manager modal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,7 +109,10 @@ impl LayoutManagerWindow {
     /// Checks if a given path is the protected root `default.json` file.
     pub fn is_root_default(&self, path: &Path) -> bool {
         let root_default = self.base_dir.join("default.json");
-        if let (Ok(p1), Ok(p2)) = (std::fs::canonicalize(path), std::fs::canonicalize(&root_default)) {
+        if let (Ok(p1), Ok(p2)) = (
+            std::fs::canonicalize(path),
+            std::fs::canonicalize(&root_default),
+        ) {
             p1 == p2
         } else {
             path == root_default
@@ -225,7 +229,10 @@ impl LayoutManagerWindow {
 
     /// Executes the layout save via UI event.
     fn execute_save(&mut self, path: PathBuf) {
-        send_ui_event(UiEvent::SaveGuiLayout { path: path.clone() });
+        send_ui_event(UiEvent::SaveGuiLayout {
+            path: path.clone(),
+            user_role: Programmer,
+        });
         self.selected_item = Some(path);
         self.show_overwrite_warning = None;
         if self.mode == LayoutDialogMode::SaveAs {
@@ -327,7 +334,7 @@ impl LayoutManagerWindow {
                     ui.painter().rect_stroke(
                         root_response.rect.expand(2.0),
                         ui.visuals().widgets.active.rounding,
-                        egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 170, 255)),
+                        egui::Stroke::new(2.0f32, egui::Color32::from_rgb(100, 170, 255)),
                     );
                 }
             }
@@ -348,7 +355,9 @@ impl LayoutManagerWindow {
                 text_edit.request_focus();
 
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if (ui.button("Create").clicked() || enter) && !self.new_folder_name.trim().is_empty() {
+                if (ui.button("Create").clicked() || enter)
+                    && !self.new_folder_name.trim().is_empty()
+                {
                     let name = self.new_folder_name.trim();
                     let target_dir = self.current_target_dir();
                     let _ = std::fs::create_dir_all(target_dir.join(name));
@@ -386,7 +395,7 @@ impl LayoutManagerWindow {
                         ui.label("📁");
                         let response = ui.add(
                             egui::TextEdit::singleline(&mut self.rename_buffer)
-                                .desired_width(150.0)
+                                .desired_width(150.0),
                         );
                         response.request_focus();
 
@@ -407,68 +416,75 @@ impl LayoutManagerWindow {
                     let id = ui.make_persistent_id(&path);
                     let is_selected = self.selected_item.as_ref() == Some(&path);
 
-                    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
-                        .show_header(ui, |ui| {
-                            let folder_btn = egui::Button::new(format!("📁 {}", folder_name))
-                                .selected(is_selected)
-                                .sense(egui::Sense::click_and_drag())
-                                .frame(false);
-                            let label = ui.add(folder_btn);
+                    egui::collapsing_header::CollapsingState::load_with_default_open(
+                        ui.ctx(),
+                        id,
+                        false,
+                    )
+                    .show_header(ui, |ui| {
+                        let folder_btn = egui::Button::new(format!("📁 {}", folder_name))
+                            .selected(is_selected)
+                            .sense(egui::Sense::click_and_drag())
+                            .frame(false);
+                        let label = ui.add(folder_btn);
 
-                            if path != self.base_dir {
-                                label.dnd_set_drag_payload(path.clone());
+                        if path != self.base_dir {
+                            label.dnd_set_drag_payload(path.clone());
+                        }
+
+                        // Drop target for folder
+                        if let Some(dragged) = label.dnd_hover_payload::<PathBuf>() {
+                            if self.is_valid_drop(&dragged, &path) {
+                                self.hovered_drop_target = Some(path.clone());
+                                ui.painter().rect_filled(
+                                    label.rect.expand(2.0),
+                                    ui.visuals().widgets.active.rounding,
+                                    egui::Color32::from_rgba_unmultiplied(80, 140, 240, 60),
+                                );
+                                ui.painter().rect_stroke(
+                                    label.rect.expand(2.0),
+                                    ui.visuals().widgets.active.rounding,
+                                    egui::Stroke::new(
+                                        2.0f32,
+                                        egui::Color32::from_rgb(100, 170, 255),
+                                    ),
+                                );
                             }
+                        }
 
-                            // Drop target for folder
-                            if let Some(dragged) = label.dnd_hover_payload::<PathBuf>() {
-                                if self.is_valid_drop(&dragged, &path) {
-                                    self.hovered_drop_target = Some(path.clone());
-                                    ui.painter().rect_filled(
-                                        label.rect.expand(2.0),
-                                        ui.visuals().widgets.active.rounding,
-                                        egui::Color32::from_rgba_unmultiplied(80, 140, 240, 60),
-                                    );
-                                    ui.painter().rect_stroke(
-                                        label.rect.expand(2.0),
-                                        ui.visuals().widgets.active.rounding,
-                                        egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 170, 255)),
-                                    );
-                                }
+                        if let Some(dragged) = label.dnd_release_payload::<PathBuf>() {
+                            if self.is_valid_drop(&dragged, &path) {
+                                self.move_item(&dragged, &path);
                             }
+                        }
 
-                            if let Some(dragged) = label.dnd_release_payload::<PathBuf>() {
-                                if self.is_valid_drop(&dragged, &path) {
-                                    self.move_item(&dragged, &path);
-                                }
-                            }
+                        if label.clicked() {
+                            self.selected_item = Some(path.clone());
+                        }
 
-                            if label.clicked() {
+                        label.context_menu(|ui| {
+                            if ui.button("📁+ New Subfolder").clicked() {
                                 self.selected_item = Some(path.clone());
+                                self.creating_folder = true;
+                                self.new_folder_name.clear();
+                                ui.close_menu();
                             }
-
-                            label.context_menu(|ui| {
-                                if ui.button("📁+ New Subfolder").clicked() {
-                                    self.selected_item = Some(path.clone());
-                                    self.creating_folder = true;
-                                    self.new_folder_name.clear();
-                                    ui.close_menu();
+                            if ui.button("✏ Rename (F2)").clicked() {
+                                self.start_rename(path.clone());
+                                ui.close_menu();
+                            }
+                            if ui.button("🗑 Delete Folder").clicked() {
+                                let _ = std::fs::remove_dir_all(&path);
+                                if self.selected_item.as_ref() == Some(&path) {
+                                    self.selected_item = None;
                                 }
-                                if ui.button("✏ Rename (F2)").clicked() {
-                                    self.start_rename(path.clone());
-                                    ui.close_menu();
-                                }
-                                if ui.button("🗑 Delete Folder").clicked() {
-                                    let _ = std::fs::remove_dir_all(&path);
-                                    if self.selected_item.as_ref() == Some(&path) {
-                                        self.selected_item = None;
-                                    }
-                                    ui.close_menu();
-                                }
-                            });
-                        })
-                        .body(|ui| {
-                            self.render_directory(ui, &path);
+                                ui.close_menu();
+                            }
                         });
+                    })
+                    .body(|ui| {
+                        self.render_directory(ui, &path);
+                    });
                 }
             } else if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
                 let display_name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
@@ -482,7 +498,7 @@ impl LayoutManagerWindow {
                         ui.label("📄");
                         let response = ui.add(
                             egui::TextEdit::singleline(&mut self.rename_buffer)
-                                .desired_width(150.0)
+                                .desired_width(150.0),
                         );
                         response.request_focus();
 
@@ -546,7 +562,8 @@ impl LayoutManagerWindow {
                             ui.close_menu();
                         }
 
-                        let rename_btn = ui.add_enabled(!is_default, egui::Button::new("✏ Rename (F2)"));
+                        let rename_btn =
+                            ui.add_enabled(!is_default, egui::Button::new("✏ Rename (F2)"));
                         if is_default {
                             rename_btn.on_hover_text("Default layout cannot be renamed!");
                         } else if rename_btn.clicked() {
@@ -591,9 +608,15 @@ impl LayoutManagerWindow {
         if let Some(selected_path) = selected_path {
             let is_dir = selected_path.is_dir();
             let display_name = if is_dir {
-                selected_path.file_name().and_then(|n| n.to_str()).unwrap_or("")
+                selected_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
             } else {
-                selected_path.file_stem().and_then(|n| n.to_str()).unwrap_or("")
+                selected_path
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
             };
             let is_default = self.is_root_default(&selected_path);
             let is_base = selected_path == self.base_dir;
@@ -607,7 +630,9 @@ impl LayoutManagerWindow {
             ui.horizontal(|ui| {
                 if !is_dir && self.mode == LayoutDialogMode::Load {
                     if ui.button("Load").clicked() {
-                        send_ui_event(UiEvent::LoadGuiLayout { path: selected_path.clone() });
+                        send_ui_event(UiEvent::LoadGuiLayout {
+                            path: selected_path.clone(),
+                        });
                         self.is_open = false;
                     }
                 }
@@ -726,7 +751,7 @@ impl LayoutManagerWindow {
                 ui.painter().rect_stroke(
                     root_res.rect.expand(2.0),
                     ui.visuals().widgets.active.rounding,
-                    egui::Stroke::new(2.0, egui::Color32::from_rgb(80, 170, 255)),
+                    egui::Stroke::new(2.0f32, egui::Color32::from_rgb(80, 170, 255)),
                 );
             }
         }
@@ -755,7 +780,7 @@ impl LayoutManagerWindow {
                     ui.painter().rect_stroke(
                         rect,
                         4.0,
-                        egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 170, 255)),
+                        egui::Stroke::new(1.5f32, egui::Color32::from_rgb(80, 170, 255)),
                     );
 
                     ui.painter().text(
@@ -786,7 +811,10 @@ impl LayoutManagerWindow {
             return;
         };
 
-        let dragged_name = dragged.file_stem().and_then(|s| s.to_str()).unwrap_or("item");
+        let dragged_name = dragged
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("item");
         let icon = if dragged.is_dir() { "📁" } else { "📄" };
 
         egui::Area::new(egui::Id::new("dnd_floating_preview"))
@@ -799,7 +827,11 @@ impl LayoutManagerWindow {
                         let target_name = if target == &self.base_dir {
                             "Root".to_string()
                         } else {
-                            target.file_name().and_then(|n| n.to_str()).unwrap_or("folder").to_string()
+                            target
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("folder")
+                                .to_string()
                         };
                         ui.horizontal(|ui| {
                             ui.label(format!("{} {}", icon, dragged_name));

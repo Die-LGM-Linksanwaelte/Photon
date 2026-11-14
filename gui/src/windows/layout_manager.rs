@@ -33,7 +33,6 @@ pub struct LayoutManagerWindow {
     pub selected_item: Option<PathBuf>,
     /// Buffer for the layout name when saving a layout.
     pub input_name: String,
-
     /// Target path pending overwrite confirmation modal, if any.
     pub show_overwrite_warning: Option<PathBuf>,
     /// Path of the item currently undergoing inline renaming, if any.

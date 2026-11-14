@@ -66,17 +66,6 @@ impl UniversePanel {
             .with(format!("universe_content_area_{}", self.tab_id));
 
         ui.push_id(panel_id, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Universe").strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("⚙").on_hover_text("Settings").clicked() {
-                        self.settings_open = true;
-                    }
-                });
-            });
-
-            self.draw_settings_frame(ui);
-
             ui.horizontal_wrapped(|ui| {
                 for i in 1..17 {
                     let is_selected = self.selected_universe == i;
@@ -87,11 +76,16 @@ impl UniversePanel {
                         }
                     }
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("⚙").on_hover_text("Settings").clicked() {
+                        self.settings_open = true;
+                    }
+                });
             });
-
             ui.add_space(8.0);
 
             self.draw_dmx_cell_pane(ui);
+            self.draw_settings_frame(ui);
         });
     }
 

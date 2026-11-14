@@ -20,11 +20,13 @@ use egui_dock::{DockArea, DockState, TabViewer};
 use network::connection_state::{ConnectionState, SessionState};
 use network::tcp_client::TcpClient;
 use panels::Tab;
+use canvas::CanvasLayout;
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, LazyLock, RwLock};
 
+pub mod canvas;
 pub mod configuration;
 pub mod controller;
 pub mod network;
@@ -59,6 +61,16 @@ pub static APP_CONFIG_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
 
     path
 });
+
+/// Describes the active Gui-mode
+#[derive(Clone, PartialEq)]
+pub enum GuiMode {
+    /// Classic Dockign and tab system (egui_dock).
+    Classic,
+    /// Free Canvas Mode.
+    Canvas,
+}
+
 /// The main GUI application state structure.
 ///
 /// Holds the docking state tree, user session parameters, network connection states,
@@ -98,10 +110,14 @@ pub struct Gui {
     pub draft_username: String,
     /// Temporary draft role selection used in the session settings window.
     pub draft_role: UserRole,
-
+    /// THe active window-layout path
     pub window_layout: PathBuf,
-
+    /// Device config for Universe Panel
     pub device_configuration: Option<Vec<FixtureType>>,
+    /// Active layout-mode
+    pub gui_mode: GuiMode,
+    /// Canvas-Layout (mehrere Seiten) für den Canvas-Modus.
+    pub canvas_layout: CanvasLayout,
 }
 
 impl Gui {
@@ -143,6 +159,8 @@ impl Gui {
             draft_role: UserRole::Programmer,
             window_layout: APP_CONFIG_DIR.join("window_layouts/default.json"),
             device_configuration: None,
+            gui_mode: GuiMode::Classic,
+            canvas_layout: CanvasLayout::new(),
         };
 
         if let Some(target) = parse_args() {
@@ -200,10 +218,15 @@ impl Gui {
                                     session_state: SessionState::LoggedIn,
                                 },
                         );
-
-                        self.tree
-                            .main_surface_mut()
-                            .push_to_focused_leaf(Tab::Terminal(new_terminal_panel));
+                        let tab = Tab::Terminal(new_terminal_panel);
+                        match self.gui_mode {
+                            GuiMode::Classic => {
+                                self.tree.main_surface_mut().push_to_focused_leaf(tab);
+                            }
+                            GuiMode::Canvas => {
+                                self.canvas_layout.current_canvas_mut().place_widget_auto(tab, 6, 4);
+                            }
+                        }
                         ui.close_menu();
                     }
 
@@ -212,9 +235,15 @@ impl Gui {
                         self.next_tab_id += 1;
 
                         let new_patch_panel = panels::patch::PatchPanel::new(new_tab_id);
-                        self.tree
-                            .main_surface_mut()
-                            .push_to_focused_leaf(Tab::Patch(new_patch_panel));
+                        let tab = Tab::Patch(new_patch_panel);
+                        match self.gui_mode {
+                            GuiMode::Classic => {
+                                self.tree.main_surface_mut().push_to_focused_leaf(tab);
+                            }
+                            GuiMode::Canvas => {
+                                self.canvas_layout.current_canvas_mut().place_widget_auto(tab, 6, 4);
+                            }
+                        }
                         ui.close_menu();
                     }
 
@@ -230,11 +259,61 @@ impl Gui {
                         self.next_tab_id += 1;
 
                         let new_universe_panel = panels::universe::UniversePanel::new(new_tab_id);
-                        self.tree
-                            .main_surface_mut()
-                            .push_to_focused_leaf(Tab::Universe(new_universe_panel));
+                        let tab = Tab::Universe(new_universe_panel);
+                        match self.gui_mode {
+                            GuiMode::Classic => {
+                                self.tree.main_surface_mut().push_to_focused_leaf(tab);
+                            }
+                            GuiMode::Canvas => {
+                                self.canvas_layout.current_canvas_mut().place_widget_auto(tab, 6, 4);
+                            }
+                        }
                         ui.close_menu();
                     }
+
+                    if self.gui_mode == GuiMode::Canvas {
+                        if ui.button("Views (ViewBar)").clicked() {
+                            let new_tab_id = self.next_tab_id;
+                            self.next_tab_id += 1;
+                            let tab = Tab::ViewBar(panels::view_bar::ViewBarPanel::new(new_tab_id, 10));
+                            self.canvas_layout.current_canvas_mut().place_widget_auto(tab, 1, 10);
+                            ui.close_menu();
+                        }
+
+                        ui.menu_button("Pages", |ui| {
+                            for i in 0..self.canvas_layout.slots.len() {
+                                let slot_name = if let Some(slot) = &self.canvas_layout.slots[i] {
+                                    format!("{:02}: {}", i + 1, slot.name)
+                                } else {
+                                    format!("{:02}: (Leer)", i + 1)
+                                };
+                                let is_current = self.canvas_layout.current_slot == i;
+                                if ui.selectable_label(is_current, slot_name).clicked() {
+                                    self.canvas_layout.switch_to(i);
+                                    ui.close_menu();
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("＋  Neue Seite").clicked() {
+                                let next_idx = self.canvas_layout.slots.len();
+                                self.canvas_layout.switch_to(next_idx);
+                                ui.close_menu();
+                            }
+                        });
+                    }
+
+                    ui.separator();
+
+                    ui.menu_button("Layout Mode", |ui| {
+                        if ui.radio(self.gui_mode == GuiMode::Classic, "Classic (Tabs & Dock)").clicked() {
+                            self.gui_mode = GuiMode::Classic;
+                            ui.close_menu();
+                        }
+                        if ui.radio(self.gui_mode == GuiMode::Canvas, "Canvas Mode").clicked() {
+                            self.gui_mode = GuiMode::Canvas;
+                            ui.close_menu();
+                        }
+                    });
 
                     ui.separator();
 
@@ -268,12 +347,20 @@ impl Gui {
     /// * `ctx` - The `egui::Context` reference.
     pub fn draw_central_panel(&mut self, ctx: &egui::Context, is_active: bool) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_enabled_ui(is_active, |ui| {
-                let mut tab_viewer = MyTabViewer {};
-                DockArea::new(&mut self.tree)
-                    .style(egui_dock::Style::from_egui(ui.style().as_ref()))
-                    .show_inside(ui, &mut tab_viewer);
-            });
+            match self.gui_mode {
+                GuiMode::Classic => {
+                    ui.add_enabled_ui(is_active, |ui| {
+                        let mut tab_viewer = MyTabViewer {};
+                        DockArea::new(&mut self.tree)
+                            .style(egui_dock::Style::from_egui(ui.style().as_ref()))
+                            .show_inside(ui, &mut tab_viewer);
+                    });
+                }
+                GuiMode::Canvas => {
+                    // Canvas-Modus mit Slot-Sidebar: freie Widget-Positionierung per Maus-Aufziehen
+                    self.canvas_layout.ui(ui);
+                }
+            }
 
             if !is_active {
                 let mut backdrop_rect = ctx.screen_rect();
@@ -528,6 +615,64 @@ impl Gui {
         self.show_session_settings = is_session_open;
     }
 
+    /// Shows the Widget-selector-popup.
+    pub fn draw_canvas_placement_popup(&mut self, ctx: &egui::Context) {
+        if self.canvas_layout.current_canvas_mut().pending_placement.is_none() {
+            return;
+        }
+
+        let logged_in = self.connection_state == Connected { session_state: SessionState::LoggedIn };
+        let mut chosen: Option<Tab> = None;
+        let mut cancel = false;
+
+        egui::Window::new("Place Widget")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Terminal").clicked() {
+                        let id = self.next_tab_id;
+                        self.next_tab_id += 1;
+                        chosen = Some(Tab::Terminal(panels::terminal::TerminalPanel::new(id, logged_in)));
+                    }
+                    if ui.button("Universe").clicked() {
+                        let _ = self.ui_event_sender.send(UiEvent::SubscribeRequest { topic: DMXConfiguration });
+                        let id = self.next_tab_id;
+                        self.next_tab_id += 1;
+                        chosen = Some(Tab::Universe(panels::universe::UniversePanel::new(id)));
+                    }
+                    if ui.button("Patch").clicked() {
+                        let id = self.next_tab_id;
+                        self.next_tab_id += 1;
+                        chosen = Some(Tab::Patch(panels::patch::PatchPanel::new(id)));
+                    }
+                    if ui.button("Views").clicked() {
+                        let id = self.next_tab_id;
+                        self.next_tab_id += 1;
+                        let slot_count = if let Some(region) = &self.canvas_layout.current_canvas_mut().pending_placement {
+                            (region.col_span * region.row_span).saturating_sub(1).max(10)
+                        } else {
+                            10
+                        };
+                        chosen = Some(Tab::ViewBar(panels::view_bar::ViewBarPanel::new(id, slot_count)));
+                    }
+                    ui.add_space(10.0);
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+
+        if let Some(tab) = chosen {
+            if let Some(region) = self.canvas_layout.current_canvas_mut().pending_placement.take() {
+                self.canvas_layout.current_canvas_mut().place_widget(tab, region);
+            }
+        } else if cancel {
+            self.canvas_layout.current_canvas_mut().pending_placement = None;
+        }
+    }
+
     /// Renders the bottom status bar displaying connection status indicator, username, role, and application version.
     ///
     /// # Arguments
@@ -694,6 +839,7 @@ impl eframe::App for Gui {
             &mut self.tcp_write_sender,
             &mut self.connection_state,
             &mut self.tree,
+            &mut self.canvas_layout,
         );
 
         let is_active = self.connection_state
@@ -706,6 +852,7 @@ impl eframe::App for Gui {
         self.draw_central_panel(ctx, is_active);
         self.draw_connection_settings(ctx);
         self.draw_session_settings(ctx);
+        self.draw_canvas_placement_popup(ctx);
 
         self.layout_manager.show(ctx);
     }

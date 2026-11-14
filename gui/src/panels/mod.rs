@@ -17,12 +17,38 @@ pub mod terminal;
 pub mod universe;
 /// Module implementing the patch panel tab.
 pub mod patch;
+/// Module implementing the canvas page switcher widget (ViewBar).
+pub mod view_bar;
 
 use terminal::TerminalPanel;
 use universe::UniversePanel;
 use patch::PatchPanel;
+use view_bar::ViewBarPanel;
 use crate::controller::{send_ui_event, UiEvent};
 use crate::UI_EVENT_SENDER;
+
+/// Struct to describe in wich modi the widget is allowed to be used
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabCompatibility {
+    /// Allowed in both Classic and Canvas modes.
+    Both,
+    /// Allowed only in Classic mode.
+    ClassicOnly,
+    /// Allowed only in Canvas mode.
+    CanvasOnly,
+}
+
+#[allow(dead_code)]
+impl TabCompatibility {
+    pub fn allows_classic(&self) -> bool {
+        matches!(self, TabCompatibility::Both | TabCompatibility::ClassicOnly)
+    }
+
+    pub fn allows_canvas(&self) -> bool {
+        matches!(self, TabCompatibility::Both | TabCompatibility::CanvasOnly)
+    }
+}
 
 /// Enum
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -30,6 +56,7 @@ pub enum TabSaveData {
     Terminal,
     Patch,
     Universe { selected_universe: u8 },
+    ViewBar { slot_count: usize },
 }
 
 /// Enum representing all dockable tab types supported in the user interface.
@@ -41,6 +68,8 @@ pub enum Tab {
     Terminal(TerminalPanel),
     /// Tab
     Patch(PatchPanel),
+    /// Widget displaying the canvas page-switching bar (ViewBar).
+    ViewBar(ViewBarPanel),
 }
 
 impl Display for Tab {
@@ -52,20 +81,34 @@ impl Display for Tab {
                 write!(f, "{}", serde_json::to_string("TerminalTab").unwrap())},
             Tab::Patch{ .. } => {
                 write!(f, "{}", serde_json::to_string("PatchTab").unwrap())},
+            Tab::ViewBar{ .. } => {
+                write!(f, "{}", serde_json::to_string("ViewBarTab").unwrap())},
         }
     }
 }
 
 impl Tab {
+    /// Returns the compatibility of this tab with the different layout modes (Classic vs. Canvas).
+    #[allow(dead_code)]
+    pub fn compatibility(&self) -> TabCompatibility {
+        match self {
+            Tab::Universe(_) => TabCompatibility::Both,
+            Tab::Terminal(_) => TabCompatibility::Both,
+            Tab::Patch(_) => TabCompatibility::Both,
+            Tab::ViewBar(_) => TabCompatibility::CanvasOnly,
+        }
+    }
+
     /// Returns the human-readable display title for this tab header.
     pub fn title(&self) -> String {
         match self {
             Tab::Universe(panel) => format!("Universe {}", panel.selected_universe),
             Tab::Terminal(_) => "Terminal".to_string(),
             Tab::Patch(_) => "Patch".to_string(),
+            Tab::ViewBar(_) => "Views".to_string(),
         }
     }
-
+    /// Returns true if this tab is of the same variant type as the other tab.
     pub fn is_same_type(&self, other: &Self) -> bool {
         std::mem::discriminant(self) == std::mem::discriminant(other)
     }
@@ -76,6 +119,7 @@ impl Tab {
             Tab::Universe(panel) => format!("universe_tab_{}", panel.tab_id),
             Tab::Terminal(panel) => format!("terminal_tab_{}", panel.tab_id),
             Tab::Patch(panel) => format!("patch_tab_{}", panel.tab_id),
+            Tab::ViewBar(panel) => format!("view_bar_tab_{}", panel.tab_id),
         }
     }
 
@@ -88,6 +132,7 @@ impl Tab {
             Tab::Universe(panel) => panel.ui(ui),
             Tab::Terminal(panel) => panel.ui(ui),
             Tab::Patch(panel) => panel.ui(ui),
+            Tab::ViewBar(panel) => panel.ui(ui),
         }
     }
 
@@ -103,8 +148,8 @@ impl Tab {
                     }
                 }
             }
-            Tab::Terminal(_) => {}
             Tab::Patch(_) => {}
+            _ => {}
         }
     }
 

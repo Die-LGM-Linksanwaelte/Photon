@@ -9,6 +9,7 @@
 //! - Processing network messages ([`TcpServerMessage`]) received from the kernel server.
 //! - Handling UI action events and updating central application states (`ConnectionState`, `SessionState`).
 
+use crate::canvas::CanvasLayout;
 use crate::configuration::GuiLayout;
 use crate::controller::UiEvent::SetConnectionState;
 use crate::network::connection_state::SessionState::{LoggedIn, LoggedOut, LoginFailed};
@@ -80,6 +81,12 @@ pub enum UiEvent {
     CloseTab {
         tab: Tab,
     },
+    /// Wechselt zu einem Canvas-Seiten-Slot (0..=9).
+    SwitchCanvasSlot(usize),
+    /// Benennt einen Canvas-Seiten-Slot um.
+    RenameCanvasSlot { slot: usize, name: String },
+    /// Leert einen Canvas-Seiten-Slot.
+    ClearCanvasSlot(usize),
 }
 
 impl Display for UiEvent {
@@ -111,6 +118,9 @@ impl Display for UiEvent {
             UiEvent::ResetGuiLayout => write!(f, "ResetGuiLayout"),
             UiEvent::CloseTab { tab } => write!(f, "CloseTab: {}", tab),
             UiEvent::UnsubscribeRequest { topic } => write!(f, "UnsubscribeRequest: {}", topic),
+            UiEvent::SwitchCanvasSlot(slot) => write!(f, "SwitchCanvasSlot: {}", slot),
+            UiEvent::RenameCanvasSlot { slot, name } => write!(f, "RenameCanvasSlot: {} -> {}", slot, name),
+            UiEvent::ClearCanvasSlot(slot) => write!(f, "ClearCanvasSlot: {}", slot),
         }
     }
 }
@@ -194,12 +204,15 @@ fn save_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>, user_role: User
         }
     };
 
-    let saved_layout = tree.map_tabs(|tab| match tab {
-        Tab::Universe(universe_panel) => TabSaveData::Universe {
-            selected_universe: universe_panel.selected_universe,
-        },
-        Tab::Terminal(_) => TabSaveData::Terminal,
-        Tab::Patch(_) => TabSaveData::Patch,
+    let saved_layout = tree.map_tabs(|tab| {
+        match tab {
+            Tab::Universe(universe_panel) => TabSaveData::Universe {
+                selected_universe: universe_panel.selected_universe,
+            },
+            Tab::Terminal(_) => TabSaveData::Terminal,
+            Tab::Patch(_) => TabSaveData::Patch,
+            Tab::ViewBar(panel) => TabSaveData::ViewBar { slot_count: panel.slots.len() },
+        }
     });
 
     let gui_layout = GuiLayout {
@@ -240,6 +253,9 @@ fn load_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
                 panel.selected_universe = *selected_universe;
                 Tab::Universe(panel)
             }
+            TabSaveData::ViewBar { slot_count } => {
+                Tab::ViewBar(panels::view_bar::ViewBarPanel::new(0, *slot_count))
+            }
         });
 
     let mut id = 1;
@@ -254,6 +270,10 @@ fn load_gui_layout(path_buf: PathBuf, tree: &mut DockState<Tab>) {
                 id += 1;
             }
             Tab::Universe(p) => {
+                p.tab_id = id;
+                id += 1;
+            }
+            Tab::ViewBar(p) => {
                 p.tab_id = id;
                 id += 1;
             }
@@ -419,11 +439,13 @@ pub(crate) fn handle_incoming_network_data(
 /// * `tcp_sender` - Mutable reference to the optional TCP client sender channel.
 /// * `connection_state` - Mutable reference to the application's central [`ConnectionState`].
 /// * `tree` - Mutable reference to the UI docking tree.
+/// * `canvas_layout` - Mutable reference to the canvas layout manager.
 pub(crate) fn handle_events(
     ui_receiver: &Receiver<UiEvent>,
     tcp_sender: &mut Option<Sender<TcpClientMessage>>,
     connection_state: &mut ConnectionState,
     tree: &mut DockState<Tab>,
+    canvas_layout: &mut CanvasLayout,
 ) {
     while let Ok(event) = ui_receiver.try_recv() {
         r_debug_log!(Info, "UIEvent: {}", event);
@@ -538,6 +560,7 @@ pub(crate) fn handle_events(
                         Tab::Terminal { .. } => None,
                         Tab::Universe { .. } => Some(SubscribeTopic::DMXConfiguration),
                         Tab::Patch { .. } => None,
+                        Tab::ViewBar { .. } => None,
                     };
                     if let Some(topic) = topic_option {
                         send_ui_event(UiEvent::UnsubscribeRequest { topic });
@@ -551,6 +574,15 @@ pub(crate) fn handle_events(
                         r_log!(Error, "Failed to send unsubscribe message: {}", e);
                     }
                 }
+            }
+            UiEvent::SwitchCanvasSlot(slot) => {
+                canvas_layout.switch_to(slot);
+            }
+            UiEvent::RenameCanvasSlot { slot, name } => {
+                canvas_layout.rename_slot(slot, name);
+            }
+            UiEvent::ClearCanvasSlot(slot) => {
+                canvas_layout.clear_slot(slot);
             }
         }
     }

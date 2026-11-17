@@ -135,12 +135,27 @@ impl Display for UiEvent {
 pub(crate) fn handle_dmx_data(
     dmx_receiver: &Receiver<(u8, [u8; MAX_CHANNEL])>,
     tree: &mut DockState<Tab>,
+    canvas_layout: &mut CanvasLayout,
+    ui_mode: &GuiMode,
 ) {
     while let Ok((universe_id, dmx_data)) = dmx_receiver.try_recv() {
-        for (_, tab) in tree.iter_all_tabs_mut() {
-            if let Tab::Universe(panel) = tab {
-                if panel.selected_universe - 1 == universe_id {
-                    panel.dmx_data.copy_from_slice(&dmx_data);
+        if ui_mode == &GuiMode::Classic {
+            for (_, tab) in tree.iter_all_tabs_mut() {
+                if let Tab::Universe(panel) = tab {
+                    if panel.selected_universe - 1 == universe_id {
+                        panel.dmx_data.copy_from_slice(&dmx_data);
+                    }
+                }
+            }
+        } else {
+            let current_slot = canvas_layout.current_slot;
+            if let Some(slot) = canvas_layout.slots.get_mut(current_slot).and_then(Option::as_mut) {
+                for widget in &mut slot.canvas.widgets {
+                    if let Tab::Universe(panel) = &mut widget.content {
+                        if panel.selected_universe - 1 == universe_id {
+                            panel.dmx_data.copy_from_slice(&dmx_data);
+                        }
+                    }
                 }
             }
         }

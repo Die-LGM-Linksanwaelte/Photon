@@ -25,6 +25,8 @@ use universe::UniversePanel;
 use patch::PatchPanel;
 use view_bar::ViewBarPanel;
 use crate::controller::{send_ui_event, UiEvent};
+use crate::network::connection_state::SessionState::LoggedIn;
+use crate::network::connection_state::{self, ConnectionState};
 use crate::UI_EVENT_SENDER;
 
 /// Struct to describe in wich modi the widget is allowed to be used
@@ -143,11 +145,33 @@ impl Tab {
         match self {
             Tab::Universe(_) => {
                 if let Some(sender) = UI_EVENT_SENDER.read().unwrap().as_ref() {
-                    if let Err(e) = sender.send(UiEvent::SubscribeRequest {topic: DMXConfiguration}) {
+                    if let Err(e) = sender.send(UiEvent::SubscribeRequest {
+                        topic: DMXConfiguration,
+                    }) {
                         r_log!(Error, "Failed to send UiEvent: {}", e);
                     }
                 }
             }
+            Tab::Patch(_) => {}
+            _ => {}
+        }
+    }
+
+    pub fn on_open(&mut self, connection_state: ConnectionState) {
+        //TODO action when tabs get opened by the window layout manager an therefore need a single update from kernel/ activation
+        match self {
+            Tab::Terminal(_) => {
+                if (connection_state
+                    == ConnectionState::Connected {
+                        session_state: (LoggedIn),
+                    })
+                {
+                    if let Tab::Terminal(panel) = self {
+                        panel.is_active = true;
+                    }
+                }
+            }
+            Tab::Universe(_) => {}
             Tab::Patch(_) => {}
             _ => {}
         }

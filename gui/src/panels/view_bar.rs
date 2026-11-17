@@ -218,7 +218,7 @@ impl ViewBarPanel {
         // Draw the button.
         if is_editing {
             painter.rect_filled(rect, rounding, v.extreme_bg_color);
-            painter.rect_stroke(rect, rounding, egui::Stroke::new(1.5, accent));
+            painter.rect_stroke(rect, rounding, egui::Stroke::new(1.5f32, accent));
 
             let edit_rect = rect.shrink(2.0);
             if let Some((_, ref mut draft)) = self.editing_slot {
@@ -239,25 +239,25 @@ impl ViewBarPanel {
             let (bg_color, stroke) = if is_active {
                 (
                     egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 50),
-                    egui::Stroke::new(2.0, accent),
+                    egui::Stroke::new(2.0f32, accent),
                 )
             } else if !slot.is_empty {
                 if hovered {
-                    (v.widgets.hovered.bg_fill, egui::Stroke::new(1.0, v.widgets.hovered.bg_stroke.color))
+                    (v.widgets.hovered.bg_fill, egui::Stroke::new(1.0f32, v.widgets.hovered.bg_stroke.color))
                 } else {
-                    (v.widgets.inactive.bg_fill, egui::Stroke::new(1.0, v.widgets.inactive.bg_stroke.color))
+                    (v.widgets.inactive.bg_fill, egui::Stroke::new(1.0f32, v.widgets.inactive.bg_stroke.color))
                 }
             } else {
                 // Empty slot.
                 if hovered {
                     (
                         egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 25),
-                        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 120)),
+                        egui::Stroke::new(1.0f32, egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 120)),
                     )
                 } else {
                     (
                         v.extreme_bg_color,
-                        egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(
+                        egui::Stroke::new(0.5f32, egui::Color32::from_rgba_unmultiplied(
                             v.window_stroke().color.r(),
                             v.window_stroke().color.g(),
                             v.window_stroke().color.b(),

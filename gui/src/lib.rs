@@ -833,7 +833,11 @@ impl eframe::App for Gui {
     /// then renders all UI components and panels.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         controller::handle_dmx_data(&self.dmx_receiver, &mut self.tree);
-        controller::handle_incoming_network_data(&mut self.tcp_listen_receiver, &mut self.tree);
+        controller::handle_incoming_network_data(
+            &mut self.tcp_listen_receiver,
+            &mut self.tree,
+            &mut self.canvas_layout,
+            &self.gui_mode);
         controller::handle_events(
             &self.ui_event_receiver,
             &mut self.tcp_write_sender,

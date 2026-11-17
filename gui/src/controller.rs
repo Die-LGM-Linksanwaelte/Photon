@@ -9,13 +9,14 @@
 //! - Processing network messages ([`TcpServerMessage`]) received from the kernel server.
 //! - Handling UI action events and updating central application states (`ConnectionState`, `SessionState`).
 
+use std::cmp::PartialEq;
 use crate::canvas::CanvasLayout;
 use crate::configuration::GuiLayout;
 use crate::controller::UiEvent::SetConnectionState;
 use crate::network::connection_state::SessionState::{LoggedIn, LoggedOut, LoginFailed};
 use crate::network::connection_state::{ConnectionState, SessionState};
 use crate::network::udp_client::MAX_CHANNEL;
-use crate::panels;
+use crate::{panels, GuiMode};
 use crate::panels::terminal::TextFragment;
 use crate::panels::{Tab, TabSaveData};
 use common::logging::LogLevel;
@@ -146,14 +147,8 @@ pub(crate) fn handle_dmx_data(
     }
 }
 
-pub fn get_tab_count(tab: &Tab, tree: &mut DockState<Tab>) -> u32 {
-    let mut count = 0;
-    for (_, tab_in_tree) in tree.iter_all_tabs_mut() {
-        if tab.is_same_type(tab_in_tree) {
-            count += 1;
-        }
-    }
-    count
+pub fn get_tab_count<'a>(tab: &Tab, tabs: impl Iterator<Item = &'a Tab>) -> u32 {
+    tabs.filter(|candidate| tab.is_same_type(candidate)).count() as u32
 }
 
 /// Thread-safe helper to send a [`UiEvent`] into the global [`crate::UI_EVENT_SENDER`] channel.
@@ -333,6 +328,17 @@ fn process_terminal_command(
         }
     }
 }
+
+impl PartialEq<GuiMode> for &GuiMode {
+    fn eq(&self, other: &GuiMode) -> bool {
+        match (self, other) {
+            (GuiMode::Classic, GuiMode::Classic) => true,
+            (GuiMode::Canvas, GuiMode::Canvas) => true,
+            _ => false,
+        }
+    }
+}
+
 /// Drains incoming network messages ([`TcpServerMessage`]) from the TCP receiver channel
 /// and updates UI tabs or triggers connection state changes.
 ///
@@ -342,6 +348,8 @@ fn process_terminal_command(
 pub(crate) fn handle_incoming_network_data(
     tcp_receiver: &mut Option<Receiver<TcpServerMessage>>,
     tree: &mut DockState<Tab>,
+    canvas_layout: &mut CanvasLayout,
+    ui_mode: &GuiMode
 ) {
     if let Some(tcp_receiver) = tcp_receiver {
         while let Ok(msg) = tcp_receiver.try_recv() {
@@ -350,14 +358,31 @@ pub(crate) fn handle_incoming_network_data(
                     answer,
                     response_id,
                 } => {
-                    for (_, tab) in tree.iter_all_tabs_mut() {
-                        if let Tab::Terminal(panel) = tab {
-                            if panel.tab_id == response_id {
-                                let (log_level, ref answer_string) = answer;
-                                panel.add_fragments(vec![TextFragment {
-                                    text: format!("[{}]: {}", log_level, answer_string),
-                                    color: log_level_to_color32(log_level),
-                                }]);
+                    if ui_mode == GuiMode::Classic {
+                        for (_, tab) in tree.iter_all_tabs_mut() {
+                            if let Tab::Terminal(panel) = tab {
+                                if panel.tab_id == response_id {
+                                    let (log_level, ref answer_string) = answer;
+                                    panel.add_fragments(vec![TextFragment {
+                                        text: format!("[{}]: {}", log_level, answer_string),
+                                        color: log_level_to_color32(log_level),
+                                    }]);
+                                }
+                            }
+                        }
+                    } else {
+                        let current_slot = canvas_layout.current_slot;
+                        if let Some(slot) = canvas_layout.slots.get_mut(current_slot).and_then(Option::as_mut) {
+                            for widget in &mut slot.canvas.widgets {
+                                if let Tab::Terminal(panel) = &mut widget.content {
+                                    if panel.tab_id == response_id {
+                                        let (log_level, ref answer_string) = answer;
+                                        panel.add_fragments(vec![TextFragment {
+                                            text: format!("[{}]: {}", log_level, answer_string),
+                                            color: log_level_to_color32(log_level),
+                                        }]);
+                                    }
+                                }
                             }
                         }
                     }
@@ -388,9 +413,20 @@ pub(crate) fn handle_incoming_network_data(
                 }
                 TcpServerMessage::TopicUpdate { data } => match data {
                     TopicPayload::DMXConfiguration(dmx_config) => {
-                        for (_, tab) in tree.iter_all_tabs_mut() {
-                            if let Tab::Universe(panel) = tab {
-                                panel.device_configuration = Some(dmx_config.clone());
+                        if ui_mode == GuiMode::Classic {
+                            for (_, tab) in tree.iter_all_tabs_mut() {
+                                if let Tab::Universe(panel) = tab {
+                                    panel.device_configuration = Some(dmx_config.clone());
+                                }
+                            }
+                        } else {
+                            let current_slot = canvas_layout.current_slot;
+                            if let Some(slot) = canvas_layout.slots.get_mut(current_slot).and_then(Option::as_mut) {
+                                for widget in &mut slot.canvas.widgets {
+                                    if let Tab::Universe(panel) = &mut widget.content {
+                                        panel.device_configuration = Some(dmx_config.clone());
+                                    }
+                                }
                             }
                         }
                     }
@@ -547,6 +583,9 @@ pub(crate) fn handle_events(
             }
             UiEvent::LoadGuiLayout { path } => {
                 load_gui_layout(PathBuf::new().join(path), tree);
+                for (_, tab) in tree.iter_all_tabs_mut() {
+                    tab.on_open(connection_state.clone());
+                }
             }
             UiEvent::ResetGuiLayout => {
                 load_gui_layout(
@@ -555,7 +594,18 @@ pub(crate) fn handle_events(
                 );
             }
             UiEvent::CloseTab { tab } => {
-                if get_tab_count(&tab, tree) == 0 {
+                let tabs = tree
+                    .iter_all_tabs_mut()
+                    .map(|(_, existing)| &*existing)
+                    .chain(
+                        canvas_layout
+                            .slots
+                            .iter()
+                            .flatten()
+                            .flat_map(|slot| slot.canvas.widgets.iter())
+                            .map(|widget| &widget.content),
+                    );
+                if get_tab_count(&tab, tabs) == 0 {
                     let topic_option: Option<SubscribeTopic> = match tab {
                         Tab::Terminal { .. } => None,
                         Tab::Universe { .. } => Some(SubscribeTopic::DMXConfiguration),
